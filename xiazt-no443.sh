@@ -479,6 +479,9 @@ def quick_host():
 
 def endpoints(c):
     result = []
+    # 固定公网入口（如 Tailscale Funnel 域名），优先于隧道域名。
+    if c.get('public_host'):
+        result.append(c['public_host'])
     if c['domain']:
         result.append(c['domain'])
     if c['tunnel'] == 'fixed':
@@ -504,22 +507,23 @@ def node_links(c, name=None, hosts=None):
         host = '[' + c['ip'] + ']' if ':' in c['ip'] else c['ip']
         links.append('ss://' + b64('chacha20-ietf-poly1305:' + c['node_password']) +
                      f"@{host}:{c['ss_port']}#" + urllib.parse.quote(name + '-SS'))
-    if c.get('h2_pin'):
+    if c.get('h2_pin') and c.get('ip'):
         host = '[' + c['ip'] + ']' if ':' in c['ip'] else c['ip']
         query = urllib.parse.urlencode({'insecure': '1', 'pinSHA256': c['h2_pin']})
         links.append(f"hysteria2://{c['h2_password']}@{host}:{c['h2_port']}/?{query}#" +
                      urllib.parse.quote(name + '-Hysteria2'))
+    prefix = c.get('url_prefix', '')
     for host in endpoints(c) if hosts is None else hosts:
         for proto in ('vless', 'trojan'):
             q = {'security': 'tls', 'sni': host, 'type': 'ws', 'host': host,
-                 'path': c['ws_prefix'] + '/' + proto}
+                 'path': prefix + c['ws_prefix'] + '/' + proto}
             if proto == 'vless':
                 q['encryption'] = 'none'
             links.append(link(proto, c['uuid'] if proto == 'vless' else c['node_password'],
                               host, 443, q, name + '-' + proto + '-' + host))
         links.append('vmess://' + b64(json.dumps({'v': '2', 'ps': name + '-vmess-' + host,
             'add': host, 'port': '443', 'id': c['uuid'], 'aid': '0', 'scy': 'auto',
-            'net': 'ws', 'type': 'none', 'host': host, 'path': c['ws_prefix'] + '/vmess',
+            'net': 'ws', 'type': 'none', 'host': host, 'path': prefix + c['ws_prefix'] + '/vmess',
             'tls': 'tls', 'sni': host}, ensure_ascii=False)))
     return links
 
@@ -786,7 +790,7 @@ WantedBy=multi-user.target
 
 
 def verify_panel(host, c):
-    url = f"https://{host}{c['panel_path']}csrf-token"
+    url = f"https://{host}{c.get('url_prefix', '')}{c['panel_path']}csrf-token"
     for attempt in range(8):
         try:
             result = request(url, timeout=5)
@@ -804,7 +808,7 @@ def verify_panel(host, c):
 def verify_public(c):
     hosts = endpoints(c)
     quick_ready = True
-    if c['tunnel'] == 'quick':
+    if c['tunnel'] == 'quick' and not c.get('public_host'):
         print('正在等待临时隧道域名，最长约 60 秒…', flush=True)
         deadline = time.monotonic() + 60
         quick_ready = False
@@ -827,7 +831,7 @@ def verify_public(c):
                 probe = subprocess.run(
                     ['curl', '-q', '--config', '-', '--fail', '--silent', '--max-time', '5',
                      '--max-filesize', str(MAX_BODY), '--user-agent', 'v2rayN/xiazt'],
-                    input=f"url = https://{host}/sub/{c['sub_token']}\n".encode(),
+                    input=f"url = https://{host}{c.get('url_prefix', '')}/sub/{c['sub_token']}\n".encode(),
                     capture_output=True, timeout=6)
                 if probe.returncode == 0 and len(probe.stdout) <= MAX_BODY:
                     if expected.issubset(parse_subscription(probe.stdout)):
@@ -861,7 +865,7 @@ def show(c):
         print(f"3x-ui 后台：http://127.0.0.1:{c['panel_port']}{c['panel_path']}")
     print('3x-ui 后台账号：' + c['username'] + '\n3x-ui 后台密码：' + c['password'])
     for host in hosts:
-        print(f"订阅：https://{host}/sub/{c['sub_token']}")
+        print(f"订阅：https://{host}{c.get('url_prefix', '')}/sub/{c['sub_token']}")
     if c['ip']:
         print(f"直连需放行 TCP {c['reality_port']}、TCP/UDP {c['ss_port']}")
         if c.get('h2_pin'):
