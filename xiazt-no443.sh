@@ -473,7 +473,8 @@ def quick_host():
     if not started:
         return ''
     p = subprocess.run(['docker', 'logs', '--since', started, '--tail', '200', 'xiazt-cf'], capture_output=True, text=True, timeout=5)
-    matches = re.findall(r'https://([a-z0-9-]+\.trycloudflare\.com)', p.stdout + p.stderr)
+    matches = [m for m in re.findall(r'https://([a-z0-9-]+\.trycloudflare\.com)', p.stdout + p.stderr)
+               if m != 'api.trycloudflare.com']
     return matches[-1] if matches else ''
 
 
