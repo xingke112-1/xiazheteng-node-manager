@@ -289,6 +289,16 @@ def container(name, img, *args, entrypoint=None, volumes=(), env=()):
     run(*cmd, img, *args, capture=True)
 
 
+def proxy_env():
+    # Hosts behind an egress HTTP proxy (e.g. Simular Box 127.0.0.1:3128):
+    # pass the proxy into the cloudflared container so the tunnel can dial out.
+    # No proxy configured on the host -> empty, behaviour unchanged.
+    return tuple(f'{k}={os.environ[k]}' for k in
+                 ('HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY',
+                  'https_proxy', 'http_proxy', 'no_proxy')
+                 if os.environ.get(k))
+
+
 def owned(name):
     return run('docker', 'inspect', '--format',
                '{{index .Config.Labels "io.xiazt.owner"}}', name,
@@ -767,11 +777,12 @@ WantedBy=multi-user.target
     elif c['tunnel'] == 'fixed':
         setup_cf(c)
         container('xiazt-cf', c['cf_image'], 'tunnel', '--no-autoupdate', 'run',
-                  '--token-file', '/run/cf-token', volumes=[(ROOT / 'cf-token', '/run/cf-token:ro')])
+                  '--token-file', '/run/cf-token', volumes=[(ROOT / 'cf-token', '/run/cf-token:ro')],
+                  env=proxy_env())
     elif c['tunnel'] == 'quick':
         print('正在启动 Cloudflare 临时隧道…', flush=True)
         container('xiazt-cf', c['cf_image'], 'tunnel', '--no-autoupdate', '--url',
-                  f"http://127.0.0.1:{c['edge_port']}")
+                  f"http://127.0.0.1:{c['edge_port']}", env=proxy_env())
 
 
 def verify_panel(host, c):
